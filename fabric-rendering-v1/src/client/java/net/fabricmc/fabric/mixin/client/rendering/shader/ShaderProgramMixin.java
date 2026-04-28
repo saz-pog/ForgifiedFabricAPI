@@ -16,28 +16,53 @@
 
 package net.fabricmc.fabric.mixin.client.rendering.shader;
 
-import com.mojang.blaze3d.shaders.Program;
-import net.fabricmc.fabric.impl.client.rendering.ClientRenderingEventHooks;
-import net.minecraft.client.renderer.ShaderInstance;
-import net.minecraft.resources.ResourceLocation;
-import net.minecraft.server.packs.resources.ResourceProvider;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+import org.spongepowered.asm.mixin.injection.ModifyVariable;
 
-@Mixin(ShaderInstance.class)
+import net.minecraft.client.gl.ShaderProgram;
+import net.minecraft.client.gl.ShaderStage;
+import net.minecraft.resource.ResourceFactory;
+import net.minecraft.util.Identifier;
+
+import net.fabricmc.fabric.impl.client.rendering.FabricShaderProgram;
+
+@Mixin(ShaderProgram.class)
 abstract class ShaderProgramMixin {
-    // Allow loading shader stages from arbitrary namespaces.
-    @Inject(method = "getOrCreate", at = @At(value = "INVOKE", target = "Lnet/minecraft/FileUtil;getFullResourcePath(Ljava/lang/String;)Ljava/lang/String;"))
-    private static void captureProgramName(ResourceProvider resourceProvider, Program.Type type, String name, CallbackInfoReturnable<Program> cir) {
-        if (name.contains(String.valueOf(ResourceLocation.NAMESPACE_SEPARATOR))) {
-            ClientRenderingEventHooks.FABRIC_PROGRAM_NAMESPACE.set(name.substring(0, name.indexOf(ResourceLocation.NAMESPACE_SEPARATOR)));
-        }
-    }
+	@Shadow
+	@Final
+	private String name;
 
-    @Inject(method = "getOrCreate", at = @At("TAIL"))
-    private static void releaseProgramName(ResourceProvider resourceProvider, Program.Type type, String name, CallbackInfoReturnable<Program> cir) {
-        ClientRenderingEventHooks.FABRIC_PROGRAM_NAMESPACE.remove();
-    }
+	// Allow loading FabricShaderPrograms from arbitrary namespaces.
+	@WrapOperation(method = "<init>", at = @At(value = "INVOKE", target = "Lnet/minecraft/util/Identifier;ofVanilla(Ljava/lang/String;)Lnet/minecraft/util/Identifier;"), allow = 1)
+	private Identifier modifyId(String id, Operation<Identifier> original) {
+		if ((Object) this instanceof FabricShaderProgram) {
+			return FabricShaderProgram.rewriteAsId(id, name);
+		}
+
+		return original.call(id);
+	}
+
+	// Allow loading shader stages from arbitrary namespaces.
+	@ModifyVariable(method = "loadShader", at = @At("STORE"), ordinal = 1)
+	private static String modifyStageId(String id, ResourceFactory factory, ShaderStage.Type type, String name) {
+		if (name.contains(String.valueOf(Identifier.NAMESPACE_SEPARATOR))) {
+			return FabricShaderProgram.rewriteAsId(id, name).toString();
+		}
+
+		return id;
+	}
+
+	@WrapOperation(method = "loadShader", at = @At(value = "INVOKE", target = "Lnet/minecraft/util/Identifier;ofVanilla(Ljava/lang/String;)Lnet/minecraft/util/Identifier;"), allow = 1)
+	private static Identifier allowNoneMinecraftId(String id, Operation<Identifier> original) {
+		if (id.contains(String.valueOf(Identifier.NAMESPACE_SEPARATOR))) {
+			return Identifier.of(id);
+		}
+
+		return original.call(id);
+	}
 }
